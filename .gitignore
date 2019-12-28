@@ -1,0 +1,45 @@
+# OSX files
+.DS_Store
+
+# Java
+*.class
+
+# Windows
+Thumbs.db
+
+# Eclipse project files
+.classpath
+.project
+.settings
+
+# IDEA
+*.iml
+.idea
+
+# Gradle
+out/
+bin/
+build/
+.gradle/
+out/
+
+# SBT
+project/project/
+project/target/
+lib_managed/
+src_managed/
+test-output/
+
+# Pants
+.pants.d/
+dist/
+.pids/
+.cache/
+*.file_lock
+*.lock_message
+
+# Maven
+target/
+
+# Project files and folders
+transaction-logs/
