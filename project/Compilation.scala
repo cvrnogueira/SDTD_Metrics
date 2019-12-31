@@ -1,5 +1,8 @@
 import sbt.Keys.{libraryDependencies, _}
 import sbt._
+import sbtassembly.AssemblyKeys._
+import sbtassembly.{MergeStrategy, PathList}
+
 
 /**
   * Project compilation settings.
@@ -26,7 +29,12 @@ object Compilation {
     libraryDependencies ++= Dependencies.all,
 
     // set project main entry point class
-    mainClass := Some("io.sicredi.core.customer.Application"),
+    mainClass := Some("io.ensimag.sdtd.metrics.Application"),
 
+    assemblyMergeStrategy in assembly := {
+      case PathList("META-INF", _@_*) => MergeStrategy.discard
+      case "reference.conf" => MergeStrategy.concat 
+      case _ => MergeStrategy.first
+    },
   )
 }

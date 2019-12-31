@@ -13,7 +13,7 @@ object Application extends App with ServerHelpers with StrictLogging {
 
   val startupTime = System.nanoTime
 
-  logger.info("Bootstrapping customer-data application")
+  logger.info("Bootstrapping metrics application")
 
   logger.info("Bootstrapping actor system that will serve http requests")
 
