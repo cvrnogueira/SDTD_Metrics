@@ -143,15 +143,19 @@ class Routes()(implicit val ec: ExecutionContext) extends SprayJsonSupport with 
                 )
               )
 
+            } else if (data.target == "g8weather") {
+              complete(toGrafanaBarsGraphResponse(CassandraOps.getG8Weather(gqr.adhocFilters.headOption.map(_.value))))
+
+            } else if (data.target == "topmentions") {
+              complete(toGrafanaBarsGraphResponse(CassandraOps.getTopTweetMentions))
+
             } else if (data.target == "tweetspersec") {
 
               complete(
                 toGrafanaTweetsPerSecResponse(
                   CassandraOps.getTweetsPerSec(
-                    start = Instant.parse(gqr.range.from).toEpochMilli,
-                    end = Instant.parse(gqr.range.to).toEpochMilli,
-                    limit = gqr.maxDataPoints,
-                    location = gqr.adhocFilters.headOption.map(_.value)
+                    start = Instant.parse(gqr.range.from).getEpochSecond,
+                    end = Instant.parse(gqr.range.to).getEpochSecond
                   )
                 )
               )
@@ -165,6 +169,14 @@ class Routes()(implicit val ec: ExecutionContext) extends SprayJsonSupport with 
         }
       }
     }
+
+  def toGrafanaBarsGraphResponse(result: List[(String, Long, Long)]): List[GrafanaProtocol.SeriesResult] = {
+    result.foldLeft(List.empty[GrafanaProtocol.SeriesResult]) { (acc, r) =>
+      val (location, aqi, updatedAt) = r
+      val data = (aqi :: updatedAt :: Nil) :: Nil
+      GrafanaProtocol.SeriesResult (location, data) :: acc
+    }
+  }
 
   def toGrafanaTweetsPerSecResponse(result: List[List[Long]]): List[GrafanaProtocol.SeriesResult] = {
     GrafanaProtocol.SeriesResult("tweetspersec", result) :: Nil

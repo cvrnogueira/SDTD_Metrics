@@ -1,8 +1,12 @@
 package io.ensimag.sdtd.metrics
 
-import com.datastax.driver.core.{Cluster, HostDistance, PoolingOptions, Session}
+import java.time.{Instant, LocalDate}
+import java.util.Arrays
+
+import com.datastax.driver.core.{BoundStatement, Cluster, HostDistance, PoolingOptions, Session}
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.LazyLogging
+
 import scala.collection.convert.ImplicitConversionsToScala._
 
 case class ScatterGraph(location: String, mentions: Long, aqi: Long, updatedAt: Long)
@@ -40,15 +44,46 @@ object CassandraOps extends CassandraCluster with LazyLogging {
   lazy val schemaTweetMetadata = "select * from sdtd.twitterpayload where location_sasi"
   lazy val schemaWeatherLocalizedMetadata = "select * from sdtd.weatherpayload where location_sasi like ? limit ?;"
   lazy val schemaWeatherAllMetadata = "select * from sdtd.weatherpayload limit ?;"
-
-  lazy val schemaTweetsSingle = "select * from sdtd.twitterpayload_single where createdat >= ? and createdat <= ? limit ? allow filtering;"
-  lazy val schemaTweetsSingleLocalized = "select * from sdtd.twitterpayload_single where createdat >= ? and createdat <= ? and location_sasi like ? limit ? allow filtering;"
-
+  lazy val schemaTweetsSingle = "select * from sdtd.twitterpayload_single where updatedat >= ? and updatedat <= ? limit ? allow filtering;"
+  lazy val schemaG8Weather = "select aqi, location, updatedat from sdtd.weatherpayload where location in ?;"
+  lazy val topTweetMentions = "select count, location from sdtd.top_twitter_mentions where now = ? order by count desc limit 50;"
 
   lazy val weatherLocalizedPreparedStatement = session.prepare(schemaWeatherLocalizedMetadata)
   lazy val weatherAllPreparedStatement = session.prepare(schemaWeatherAllMetadata)
-  lazy val tweetsSingleLocalizedPreparedStatement = session.prepare(schemaTweetsSingleLocalized)
   lazy val tweetsSingleAllPreparedStatement = session.prepare(schemaTweetsSingle)
+  lazy val g8WeatherStatement = session.prepare(schemaG8Weather)
+  lazy val g8WeatherStatementDefault =  g8WeatherStatement.bind(Arrays.asList("united states", "japan", "italy", "united kingdom", "germany", "france", "canada"))
+  lazy val topTweetMentionsStatement = session.prepare(topTweetMentions)
+
+  def getTopTweetMentions: List[(String, Long, Long)] = {
+    val binding = topTweetMentionsStatement.bind(today.asInstanceOf[Object])
+
+    val now = nowEpoch()
+
+    val fetched = session.execute(binding).map { r =>
+      (r.getString("location"), r.getLong("count"), now)
+    }
+    .toList
+
+    val filtered = fetched
+      .groupBy(_._1)
+      .toList
+      .sortBy(_._2.maxBy(_._2)._2)
+      .map(_._2.head)
+
+    val dropN = if (filtered.size > 10) filtered.size - 10 else 0
+
+    filtered.drop(dropN)
+  }
+
+  def getG8Weather(location: Option[String]): List[(String, Long, Long)] = {
+    val binding = location.map(l => g8WeatherStatement.bind(Arrays.asList(sanitizeLocation(l))))
+        .getOrElse(g8WeatherStatementDefault)
+
+    session.execute(binding).map { r =>
+      (r.getString("location"), r.getLong("aqi"), r.getLong("updatedat"))
+    }.toList
+  }
 
   def getScatterLocationLike(location: Option[String] = None, limit: Int = 25): List[String] = {
     val weatherBindings = location.
@@ -61,19 +96,21 @@ object CassandraOps extends CassandraCluster with LazyLogging {
       .map(_.getString("location"))
   }
 
-  def getTweetsPerSec(start: Long, end: Long, limit: Int = 25, location: Option[String]): List[List[Long]] = {
-    val bindings = location.
-      map(loc => tweetsSingleLocalizedPreparedStatement.bind(start.asInstanceOf[Object], end.asInstanceOf[Object], s"%$loc%", limit.asInstanceOf[Object])).
-      getOrElse(tweetsSingleAllPreparedStatement.bind(start.asInstanceOf[Object], end.asInstanceOf[Object], limit.asInstanceOf[Object]))
+  def getTweetsPerSec(start: Long, end: Long): List[List[Long]] = {
+    val limit = (end - start).toInt
+
+    val bindings = tweetsSingleAllPreparedStatement.bind(
+      start.asInstanceOf[Object],
+      end.asInstanceOf[Object],
+      limit.asInstanceOf[Object]
+    )
 
     session.execute(bindings)
       .all()
       .toList
-      .map(_.getLong("createdat"))
-      .groupBy(_ / 1000)
-      .map(t => List(t._2.length, t._1 * 1000))
-      .toList
-      .sortBy(_.tail.headOption.getOrElse(-1L))
+      .map(r => (r.getLong("updatedat"), r.getLong("mentions")))
+      .sortBy(_._1)
+      .map({ case (t1, t2) => t2 :: t1 * 1000 :: Nil })
   }
 
   def getScatterGraphData(start: Long, end: Long, limit: Int, location: Option[String]): List[ScatterGraph] = {
@@ -107,4 +144,11 @@ object CassandraOps extends CassandraCluster with LazyLogging {
         )
       ))
   }
+
+  def sanitizeLocation(value: String) = value.replaceAll("'", "").toLowerCase
+
+  @inline
+  def today() = LocalDate.now().toEpochDay
+
+  def nowEpoch() = Instant.EPOCH.toEpochMilli
 }
